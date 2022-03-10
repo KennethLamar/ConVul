@@ -1,0 +1,157 @@
+Build: make PIN_ROOT=/home/kenneth/Downloads/pin-3.18-98332-gaebd7b1e6-gcc-linux/
+Build debug: make DEBUG=1 PIN_ROOT=/home/kenneth/Downloads/pin-3.18-98332-gaebd7b1e6-gcc-linux/
+Run: '/home/kenneth/Downloads/pin-3.18-98332-gaebd7b1e6-gcc-linux/pin' -t '/home/kenneth/ConVul/ConVulPinTool/obj-intel64/ConVulPinTool.so' -- /bin/ls
+Run w/ debugger: '/home/kenneth/Downloads/pin-3.18-98332-gaebd7b1e6-gcc-linux/pin' -injection child -pause_tool 10 -t '/home/kenneth/ConVul/ConVulPinTool/obj-intel64/ConVulPinTool.so' -- /bin/ls
+
+High-level algorithm descriptions (in my words)
+Relaxed exchangeable events definition:
+    1) D(e1,e2)=0 (No HBR)
+    2) D(e1,e2)>=1 and D(eany,e2)<=1 and D(eany,e1)=0
+        D(e1,e2)>=1: Holds if 1 is false.
+        D(eany,e2)<=1:
+            eany is the event just before acquire(l) associated with e2's block.
+            eany must be outside of e2's synchronization block but run by the same thread. 
+            D()=0 if eany and e2 are unsynchronized. 
+            Event order:
+                e1
+                release(l)
+                eany
+                acquire(l)
+                e2
+        D(eany,e1)=0: Just run HBR on these.
+Algorithm 1:
+    Phase 1, D()=0: Check for a clear HBR between two events. If the events appear concurrent from this check, then they are exchangeable.
+    Phase 2, D()<=3:
+        Use predVC to ensure VCl is unchanged after e1.
+        Find the event before acq(l) associated with e2 and call it eany. If eany and e1 appear concurrent from this HBR check and our lock's VC is equal to our predicted VC, then they are exchangeable.
+        // NOTE: We could probably get rid of predVC by using Block to track the locks associated with each acq and rel.
+    Phase 2 event order:
+        e1
+        eRel
+        eAny
+        eAcq
+        e2
+Algorithm 2:
+    Each memory access gets the latest thread clock from the thread that accesses it.
+    Whenever a pointer is freed:
+        Get the size of the object pointed to when dereferenced.
+        For each byte in the object:
+            For each memory access event that accesses this location:
+                If such an event is exchangeable with the free() event, report UAF.
+Algorithm 3:
+    For each memory location (in their class)
+        Track a VC for all NULL writes to all pointers.
+        Track a VC for all non-NULL writes to all pointers.
+        Track a VC for all reads to all pointers.
+        Non-pointers can be ignored, but how to do so is tricky.
+    On write:
+        If we are trying to write NULL:
+            For each read to this location:
+                If the read and our write are exchangeable:
+                    Report a NPD.
+            Update the memory location's NULL write VC associated with the calling thread, t.
+        If we are trying to write non-NULL:
+            Update the memory location's non-NULL write VC associated with the calling thread, t.
+    On Read:
+        If the read is a pointer dereference (determined by heuristic):
+            Do no more.
+        for each non-NULL write to p:
+            for each NULL write to p:
+                If the NULL and non-NULL events are exchangeable:
+                    Report a NPD.
+            if our read and a non-NULL write are exchangeable:
+                report a NPD.
+        Update the memory location's read VC associated with the calling thread, t.
+    On read (high level idea):
+        We know we have a read.
+        If we previously had a NULL write and a non-NULL write:
+            If those events are exchangeable, then our read could produce a NPD.
+            If the non-NULL write is exchangeable with this read, it could produce a NPD.
+        // NOTE: We only need to consider the most recent NULL and non-NULL writes of each thread here. Most anything before those could not affect this read. If there are earlier operations that would affect it, then the most recent ones will as well. At least, that's the theory.
+    deref heuristic(current instruction):
+        Get the next instruction.
+        If...
+            the current instruction is a read,
+            the next instruction is a read and write,
+            and the Base Register of the next instruction is the Operand Register of the current instruction:
+                return true.
+        return false.
+Algorithm 4:
+    For each memory location m, maintain a map of all pointers in memory pointing to m.
+    For each pointer p, maintain a map of all events that free p.
+    When a pointer p is assigned to memory m:
+        For all pointers:
+            Remove p from each of these memory locations' pointer maps. p no longer points to any of them.
+        Add p to the map of pointers to m.
+    When a pointer is freed:
+        For each pointer p pointing to m:
+            For each event that associated pointer p to m?:
+                For each event that frees p:
+                    If the event that wrote p to m is exchangeable with an event that frees p:
+                        Report a DF.
+                    Else if the event that wrote p to m is exchangeable with our current free:
+                        Report a DF.
+                Add our event to the list of events that free p.
+    On pointer free (high level idea):
+        Assume there are two frees, separated by a pointer write.
+        If the pointer write is exchangeable with either of those frees, then there is a double free bug.
+
+
+Deref() is the heuristic to do "pointer" analysis, it seems.
+Create a ConVul manager that accepts events from Pin. It will run the code described in the paper to report races. We should be able to enable and disable detection tools at will to reduce overhead.
+Keep the VC updates in the existing implementation. Remove the logic that reports HBR violations. Use the ConVul pseudocode for violations instead.
+When the paper is talking about a pointer, p, they mean the value of the pointer in memory location m, not the actual memory location pointed to.
+We should consider filtering memory addresses based on stack size for each thread.
+
+What things we need from data structures, layout ideas, etc.
+Event:
+    threadID
+    traceIdx
+    type
+    vector<Block*>
+    VC
+
+    addr
+    writeVal
+    objSize
+
+    HBR(Event * e):
+    isExchangeable(Event *e):
+Block:
+    threadID
+    acqIdx
+    relIdx
+    lock*
+Thread:
+    VC
+    vector<Event> trace // A trace of all events tracked and logged to be associated with this thread.
+    vector<Block> currentBlocks // The blocks associated with locks currently held by the thread.
+Memory:
+    VC // A general vector clock for UAF.
+
+    // These should be for pointers only.
+    pReadVC // A read vector clock for NPD.
+    pWriteVC // A non-NULL write vector clock for NPD.
+    pWriteNULLVC // A NULL write vector clock for NPD.
+
+    // These are for DF detection.
+    set<Memory*> pointers // All memory locations that point to us.
+    set<Event*> freeEvents // All events that free us.
+Lock:
+    VC
+ConVulManager:
+    map<threadID, Threads*> // Our actual list of threads.
+    map<uintptr_t, Memory*> // A map to all tracked memory locations.
+    
+    onMemAccess(addr, tid):
+    onRead(addr):
+    onWrite(addr, val):
+    onFree(pointer):
+    onAcq(tid, lock*):
+    onRel(tid, lock*):
+Pin: // The functions that instrument calls to ConVulManager.
+
+Pin arguments:
+    IARG_THREAD_ID: Thread ID, starting at 0.
+    IARG_FUNCARG_ENTRYPOINT_VALUE, 0: Function argument at index 0. // See: https://software.intel.com/sites/landingpage/pintool/docs/98332/Pin/html/index.html#FunctionArguments
+    IARG_FUNCARG_ENTRYPOINT_REFERENCE provides a refernce to IARG_FUNCARG_ENTRYPOINT_VALUE.

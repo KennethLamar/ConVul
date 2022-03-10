@@ -1,0 +1,49 @@
+// NOTE: This script will never actually work. Debugging pintools requires attaching via GDB.
+// Here are the steps, for posterity:
+// Run the tool, with child injection and a delay, via the following command:
+// '/home/kenneth/Downloads/pin-3.18-98332-gaebd7b1e6-gcc-linux/pin' -injection child -pause_tool 10 -t '/home/kenneth/ConVul/ConVulPinTool/obj-intel64/ConVulPinTool.so' -- /bin/ls
+// Run gdb, then attach on the pid printed by the paused tool.
+// Copy and paste the command listed by the tool that adds missing symbols to GDB.
+// Continue the program in GDB via continue, or c for short.
+// Debug as normal. backtrace (bt for short) has been particularly helpful for me.
+
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/kenneth/Downloads/pin-3.18-98332-gaebd7b1e6-gcc-linux/pin",
+            "args": [
+                "-injection",
+                "child",
+                "-t",
+                //"'/home/kenneth/Downloads/pin-3.18-98332-gaebd7b1e6-gcc-linux/source/tools/MyPinTool/obj-intel64/MyPinTool.so'",
+                "'/home/kenneth/ConVul/ConVulPinTool/obj-intel64/ConVulPinTool.so'",
+                "--",
+                "/bin/ls"
+                //"'/home/kenneth/ConVul/cve-benchmark/2011-2183.out'"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Ignore SIGUSR1 signals",
+                    "text": "handle SIGUSR1 nostop noprint pass"
+                }
+            ]
+        }
+    ]
+}
