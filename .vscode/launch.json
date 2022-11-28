@@ -3,7 +3,7 @@
 // Run the tool, with child injection and a delay, via the following command:
 // '/home/kenneth/Downloads/pin-3.18-98332-gaebd7b1e6-gcc-linux/pin' -injection child -pause_tool 10 -t '/home/kenneth/ConVul/ConVulPinTool/obj-intel64/ConVulPinTool.so' -- /bin/ls
 // Run gdb, then attach on the pid printed by the paused tool.
-// Copy and paste the command listed by the tool that adds missing symbols to GDB.
+// Copy and paste the command output by the tool. This will add missing symbols to GDB.
 // Continue the program in GDB via continue, or c for short.
 // Debug as normal. backtrace (bt for short) has been particularly helpful for me.
 
